@@ -4,7 +4,7 @@ using namespace System.Management.Automation.Subsystem.Prediction
 
 # Register the predictor subsystem
 $predictor = [ScrollbackPredictor.ScrollbackPredictor]::new()
-[SubsystemManager]::RegisterSubsystem[ICommandPredictor]($predictor)
+[SubsystemManager]::RegisterSubsystem([SubsystemKind]::CommandPredictor, $predictor)
 
 # Hook into Out-Default to capture command output
 $ExecutionContext.InvokeCommand.PostCommandLookupAction = {
@@ -65,7 +65,7 @@ function Get-ScrollbackIndexCount {
 $MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
     # Unregister predictor on module removal
     try {
-        [SubsystemManager]::UnregisterSubsystem[ICommandPredictor]([guid]'f3b3e7a0-6c1a-4e2d-9f5b-8a7c3d2e1f00')
+        [SubsystemManager]::UnregisterSubsystem([SubsystemKind]::CommandPredictor, [guid]'f3b3e7a0-6c1a-4e2d-9f5b-8a7c3d2e1f00')
     } catch {
         # Ignore if already unregistered
     }
