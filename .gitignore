@@ -3,6 +3,11 @@
 ##
 ## Get latest from https://github.com/github/gitignore/blob/main/VisualStudio.gitignore
 
+# Module build output (produced by dotnet build into module/)
+module/*.dll
+module/*.pdb
+module/*.deps.json
+
 # User-specific files
 *.rsuser
 *.suo
