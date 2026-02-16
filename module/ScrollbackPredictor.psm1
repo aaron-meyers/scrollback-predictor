@@ -6,38 +6,62 @@ using namespace System.Management.Automation.Subsystem.Prediction
 $predictor = [ScrollbackPredictor.ScrollbackPredictor]::new()
 [SubsystemManager]::RegisterSubsystem([SubsystemKind]::CommandPredictor, $predictor)
 
-# Proxy Out-Default to intercept pipeline output
-$wrappedCmd = $ExecutionContext.InvokeCommand.GetCommand('Microsoft.PowerShell.Core\Out-Default', [CommandTypes]::Cmdlet)
-$scriptCmd = { & $wrappedCmd @PSBoundParameters }
-$steppablePipeline = $null
+# Capture output via transcript file monitoring.
+# PowerShell 7 doesn't route implicit output through Out-Default function overrides,
+# so we start a transcript and read new content at each prompt.
 
-function Global:Out-Default {
-    [CmdletBinding()]
-    param(
-        [switch]$Transcript,
-        [Parameter(ValueFromPipeline = $true)]
-        [psobject]$InputObject
-    )
+$transcriptPath = [System.IO.Path]::Combine(
+    [System.IO.Path]::GetTempPath(),
+    "ScrollbackPredictor_$PID.log"
+)
+$global:__ScrollbackTranscriptPath = $transcriptPath
+$global:__ScrollbackLastPosition = 0
 
-    begin {
-        $sp = $script:scriptCmd.GetSteppablePipeline($MyInvocation.CommandOrigin)
-        $sp.Begin($PSCmdlet)
-        Set-Variable -Scope 1 -Name steppablePipeline -Value $sp
-    }
+try {
+    Start-Transcript -Path $transcriptPath -Force | Out-Null
+} catch {
+    # Transcript may already be running; try to stop and restart
+    try { Stop-Transcript | Out-Null } catch { }
+    Start-Transcript -Path $transcriptPath -Force | Out-Null
+}
 
-    process {
-        if ($null -ne $InputObject) {
+# Save the original prompt
+$originalPrompt = $function:Global:prompt
+
+function Global:prompt {
+    # Read new transcript content since last check
+    try {
+        $path = $global:__ScrollbackTranscriptPath
+        if ($path -and [System.IO.File]::Exists($path)) {
+            $fs = [System.IO.FileStream]::new($path, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
             try {
-                [ScrollbackPredictor.ScrollbackIndex]::AddLine($InputObject.ToString())
-            } catch {
-                # Silently ignore indexing errors
+                $len = $fs.Length
+                $lastPos = $global:__ScrollbackLastPosition
+                if ($len -gt $lastPos) {
+                    $fs.Position = $lastPos
+                    $reader = [System.IO.StreamReader]::new($fs, [System.Text.Encoding]::UTF8, $false, 4096, $true)
+                    try {
+                        $newText = $reader.ReadToEnd()
+                        $global:__ScrollbackLastPosition = $len
+                        foreach ($line in $newText -split '\r?\n') {
+                            if ($line -and $line.Trim()) {
+                                [ScrollbackPredictor.ScrollbackIndex]::AddLine($line)
+                            }
+                        }
+                    } finally {
+                        $reader.Dispose()
+                    }
+                }
+            } finally {
+                $fs.Dispose()
             }
         }
-        $steppablePipeline.Process($InputObject)
-    }
+    } catch { }
 
-    end {
-        $steppablePipeline.End()
+    if ($script:originalPrompt) {
+        & $script:originalPrompt
+    } else {
+        "PS $($executionContext.SessionState.Path.CurrentLocation)$('>' * ($nestedPromptLevel + 1)) "
     }
 }
 
@@ -62,10 +86,23 @@ $MyInvocation.MyCommand.ScriptBlock.Module.OnRemove = {
     # Unregister predictor on module removal
     try {
         [SubsystemManager]::UnregisterSubsystem([SubsystemKind]::CommandPredictor, [guid]'f3b3e7a0-6c1a-4e2d-9f5b-8a7c3d2e1f00')
-    } catch {
-        # Ignore if already unregistered
+    } catch { }
+
+    # Stop transcript and clean up
+    try { Stop-Transcript | Out-Null } catch { }
+    $path = $global:__ScrollbackTranscriptPath
+    if ($path -and [System.IO.File]::Exists($path)) {
+        try { Remove-Item $path -Force } catch { }
     }
 
-    # Remove the Out-Default proxy
-    Remove-Item Function:\Out-Default -ErrorAction SilentlyContinue
+    # Restore original prompt
+    if ($script:originalPrompt) {
+        $function:Global:prompt = $script:originalPrompt
+    } else {
+        Remove-Item Function:\prompt -ErrorAction SilentlyContinue
+    }
+
+    # Clean up global variables
+    Remove-Variable -Name __ScrollbackTranscriptPath -Scope Global -ErrorAction SilentlyContinue
+    Remove-Variable -Name __ScrollbackLastPosition -Scope Global -ErrorAction SilentlyContinue
 }
