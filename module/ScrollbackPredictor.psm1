@@ -7,10 +7,9 @@ $predictor = [ScrollbackPredictor.ScrollbackPredictor]::new()
 [SubsystemManager]::RegisterSubsystem([SubsystemKind]::CommandPredictor, $predictor)
 
 # Proxy Out-Default to intercept pipeline output
-$wrappedCmd = Get-Command Microsoft.PowerShell.Core\Out-Default
-$cmdMeta = [System.Management.Automation.CommandMetaData]::new($wrappedCmd)
-$proxyBody = [System.Management.Automation.ProxyCommand]::Create($cmdMeta)
-$proxyScriptBlock = [ScriptBlock]::Create($proxyBody)
+$wrappedCmd = $ExecutionContext.InvokeCommand.GetCommand('Microsoft.PowerShell.Core\Out-Default', [CommandTypes]::Cmdlet)
+$scriptCmd = { & $wrappedCmd @PSBoundParameters }
+$steppablePipeline = $null
 
 function Global:Out-Default {
     [CmdletBinding()]
@@ -21,15 +20,15 @@ function Global:Out-Default {
     )
 
     begin {
-        $steppablePipeline = $script:proxyScriptBlock.GetSteppablePipeline($MyInvocation.CommandOrigin)
-        $steppablePipeline.Begin($PSCmdlet)
+        $sp = $script:scriptCmd.GetSteppablePipeline($MyInvocation.CommandOrigin)
+        $sp.Begin($PSCmdlet)
+        Set-Variable -Scope 1 -Name steppablePipeline -Value $sp
     }
 
     process {
         if ($null -ne $InputObject) {
             try {
-                $text = $InputObject.ToString()
-                [ScrollbackPredictor.ScrollbackIndex]::AddLine($text)
+                [ScrollbackPredictor.ScrollbackIndex]::AddLine($InputObject.ToString())
             } catch {
                 # Silently ignore indexing errors
             }
