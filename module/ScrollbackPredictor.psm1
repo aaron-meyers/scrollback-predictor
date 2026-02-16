@@ -6,13 +6,11 @@ using namespace System.Management.Automation.Subsystem.Prediction
 $predictor = [ScrollbackPredictor.ScrollbackPredictor]::new()
 [SubsystemManager]::RegisterSubsystem([SubsystemKind]::CommandPredictor, $predictor)
 
-# Hook into Out-Default to capture command output
-$ExecutionContext.InvokeCommand.PostCommandLookupAction = {
-    param($commandName, $commandLookupEventArgs)
-}
-
 # Proxy Out-Default to intercept pipeline output
-$originalOutDefault = Get-Command Microsoft.PowerShell.Core\Out-Default -ErrorAction SilentlyContinue
+$wrappedCmd = Get-Command Microsoft.PowerShell.Core\Out-Default
+$cmdMeta = [System.Management.Automation.CommandMetaData]::new($wrappedCmd)
+$proxyBody = [System.Management.Automation.ProxyCommand]::Create($cmdMeta)
+$proxyScriptBlock = [ScriptBlock]::Create($proxyBody)
 
 function Global:Out-Default {
     [CmdletBinding()]
@@ -23,8 +21,7 @@ function Global:Out-Default {
     )
 
     begin {
-        $wrappedCmd = $ExecutionContext.InvokeCommand.GetCommand('Microsoft.PowerShell.Core\Out-Default', [CommandTypes]::Cmdlet)
-        $steppablePipeline = $wrappedCmd.GetSteppablePipeline($MyInvocation.CommandOrigin)
+        $steppablePipeline = $script:proxyScriptBlock.GetSteppablePipeline($MyInvocation.CommandOrigin)
         $steppablePipeline.Begin($PSCmdlet)
     }
 
