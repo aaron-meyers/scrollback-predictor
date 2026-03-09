@@ -404,6 +404,7 @@ function script:Install-KeyHandlers {
             if ($r) {
                 [Microsoft.PowerShell.PSConsoleReadLine]::Replace($r.Start, $r.Length, $r.Text)
                 [Microsoft.PowerShell.PSConsoleReadLine]::SetCursorPosition($r.Start + $r.Text.Length)
+                [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
             } else {
                 [Microsoft.PowerShell.PSConsoleReadLine]::Ding()
             }
@@ -416,6 +417,7 @@ function script:Install-KeyHandlers {
             if ($r) {
                 [Microsoft.PowerShell.PSConsoleReadLine]::Replace($r.Start, $r.Length, $r.Text)
                 [Microsoft.PowerShell.PSConsoleReadLine]::SetCursorPosition($r.Start + $r.Text.Length)
+                [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
             } else {
                 [Microsoft.PowerShell.PSConsoleReadLine]::Ding()
             }
