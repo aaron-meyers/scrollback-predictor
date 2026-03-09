@@ -23,7 +23,8 @@ PSReadLine key handlers intercept **Ctrl+N** (next match) and **Ctrl+P** (previo
 2. Searches the token store for case-insensitive prefix matches
 3. Returns matches sorted by recency (most recently seen first)
 4. Cycles through matches on repeated presses
-5. **Escape** reverts to the original prefix
+5. After the last match, cycles back to the original typed prefix (vim behavior)
+6. Does not override Escape — compatible with PSReadLine vi mode
 
 Tokens are extracted by splitting on whitespace and decomposing paths/dotted names into components (e.g., `C:\Users\foo\bar.txt` yields `bar.txt`, `bar`, `foo`, `Users`, etc.).
 
@@ -45,9 +46,8 @@ Enable-ScrollbackPredictor
 
 | Key | Action |
 |-----|--------|
-| **Ctrl+N** | Complete / cycle forward through matches |
-| **Ctrl+P** | Cycle backward through matches |
-| **Escape** | Cancel completion, revert to original text |
+| **Ctrl+N** | Complete / cycle forward through matches (wraps to original text) |
+| **Ctrl+P** | Cycle backward through matches (wraps to original text) |
 
 ### Diagnostic Commands
 

@@ -312,15 +312,15 @@ function script:Invoke-TokenCompletion {
     if ($cs.Active) {
         # Check if we're still in a valid completion cycle:
         # The buffer between ReplacementStart and ReplacementEnd should contain
-        # the currently selected match
+        # the currently selected match (or original prefix at the end of the list)
         if ($cs.ReplacementStart -ge $line.Length -or $cs.ReplacementEnd -gt $line.Length) {
             $cs.Active = $false
         } else {
-            $currentMatch = $cs.Matches[$cs.Index]
+            $expected = $cs.Matches[$cs.Index]
             $replLen = $cs.ReplacementEnd - $cs.ReplacementStart
             $bufferWord = $line.Substring($cs.ReplacementStart, $replLen)
 
-            if ($bufferWord -ne $currentMatch) {
+            if ($bufferWord -ne $expected) {
                 # User edited the buffer; reset completion state
                 $cs.Active = $false
             }
@@ -349,10 +349,13 @@ function script:Invoke-TokenCompletion {
             return
         }
 
+        # Append the original prefix so cycling wraps back to it (vim behavior)
+        $matches = @($matches) + @($prefix)
+
         $cs.Active = $true
         $cs.OriginalPrefix = $prefix
         $cs.Matches = $matches
-        $cs.Index = if ($Direction -eq 1) { 0 } else { $matches.Count - 1 }
+        $cs.Index = if ($Direction -eq 1) { 0 } else { $matches.Count - 2 }
         $cs.ReplacementStart = $wordStart
         $cs.ReplacementEnd = $cursor
     } else {
@@ -371,6 +374,11 @@ function script:Invoke-TokenCompletion {
         $match
     )
     $cs.ReplacementEnd = $cs.ReplacementStart + $match.Length
+
+    # Deactivate when we cycle back to the original prefix
+    if ($cs.Index -eq $cs.Matches.Count - 1) {
+        $cs.Active = $false
+    }
 }
 
 function script:Install-KeyHandlers {
@@ -385,30 +393,11 @@ function script:Install-KeyHandlers {
         -ScriptBlock {
             & (Get-Module ScrollbackPredictor) { Invoke-TokenCompletion -Direction (-1) }
         }
-
-    # Reset completion state on Escape
-    Set-PSReadLineKeyHandler -Key Escape -BriefDescription 'ScrollbackCompleteCancel' `
-        -LongDescription 'Cancel scrollback completion and revert to original prefix' `
-        -ScriptBlock {
-            $cs = & (Get-Module ScrollbackPredictor) { $script:CompletionState }
-            if ($cs.Active) {
-                $replLen = $cs.ReplacementEnd - $cs.ReplacementStart
-                [Microsoft.PowerShell.PSConsoleReadLine]::Replace(
-                    $cs.ReplacementStart,
-                    $replLen,
-                    $cs.OriginalPrefix
-                )
-                $cs.Active = $false
-            } else {
-                [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
-            }
-        }
 }
 
 function script:Uninstall-KeyHandlers {
     Remove-PSReadLineKeyHandler -Key Ctrl+n -ErrorAction SilentlyContinue
     Remove-PSReadLineKeyHandler -Key Ctrl+p -ErrorAction SilentlyContinue
-    Remove-PSReadLineKeyHandler -Key Escape -ErrorAction SilentlyContinue
 }
 
 #endregion

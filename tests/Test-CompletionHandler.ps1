@@ -66,7 +66,7 @@ $matches = & $mod { Find-TokenMatches "deploy" }
 Assert-Equal 3 $matches.Count "Found 3 matches for prefix 'deploy'"
 Assert-Equal 'deployment-charlie' $matches[0] "Most recent match is first (charlie)"
 
-# Test completion state transitions
+# Test completion state transitions (vim-style: matches + original prefix at end)
 & $mod {
     $cs = $script:CompletionState
     $cs.Active = $false
@@ -76,10 +76,12 @@ Assert-Equal 'deployment-charlie' $matches[0] "Most recent match is first (charl
 }
 
 # Simulate first Ctrl+N: start completion with prefix "deploy" on line "echo deploy"
+# Matches list should be: [charlie, bravo, alpha, "deploy" (original)]
 & $mod {
     $cs = $script:CompletionState
     $prefix = "deploy"
-    $matches = Find-TokenMatches $prefix
+    $found = Find-TokenMatches $prefix
+    $matches = @($found) + @($prefix)
     $cs.Active = $true
     $cs.OriginalPrefix = $prefix
     $cs.Matches = $matches
@@ -91,42 +93,50 @@ Assert-Equal 'deployment-charlie' $matches[0] "Most recent match is first (charl
 $cs = & $mod { $script:CompletionState }
 Assert-True $cs.Active "Completion state is active after first Ctrl+N"
 Assert-Equal 'deploy' $cs.OriginalPrefix "Original prefix preserved"
+Assert-Equal 4 $cs.Matches.Count "Matches list has 3 completions + original prefix"
 Assert-Equal 0 $cs.Index "Index is 0 (first match)"
 Assert-Equal 'deployment-charlie' $cs.Matches[0] "First match is deployment-charlie"
+Assert-Equal 'deploy' $cs.Matches[3] "Last element is original prefix"
 
-# Simulate second Ctrl+N: cycle forward
+# Simulate Ctrl+N cycling through all matches + back to prefix
 & $mod {
     $cs = $script:CompletionState
-    $cs.Index += 1
-    if ($cs.Index -ge $cs.Matches.Count) { $cs.Index = 0 }
-    $match = $cs.Matches[$cs.Index]
-    $cs.ReplacementEnd = $cs.ReplacementStart + $match.Length
+    $cs.Index = 1  # bravo
 }
-
 $cs = & $mod { $script:CompletionState }
-Assert-Equal 1 $cs.Index "After cycling forward, index is 1"
-Assert-Equal 'deployment-bravo' $cs.Matches[$cs.Index] "Second match is deployment-bravo"
+Assert-Equal 'deployment-bravo' $cs.Matches[$cs.Index] "Index 1 is deployment-bravo"
 
-# Simulate Ctrl+P: cycle backward
+& $mod {
+    $cs = $script:CompletionState
+    $cs.Index = 2  # alpha
+}
+$cs = & $mod { $script:CompletionState }
+Assert-Equal 'deployment-alpha' $cs.Matches[$cs.Index] "Index 2 is deployment-alpha"
+
+& $mod {
+    $cs = $script:CompletionState
+    $cs.Index = 3  # original prefix
+}
+$cs = & $mod { $script:CompletionState }
+Assert-Equal 'deploy' $cs.Matches[$cs.Index] "Index 3 cycles back to original prefix"
+
+# Simulate wrap-around from prefix → first match
+& $mod {
+    $cs = $script:CompletionState
+    $cs.Index = ($cs.Index + 1) % $cs.Matches.Count
+}
+$cs = & $mod { $script:CompletionState }
+Assert-Equal 0 $cs.Index "After wrap-around forward, back to index 0"
+
+# Simulate Ctrl+P from index 0 wraps to original prefix
 & $mod {
     $cs = $script:CompletionState
     $cs.Index -= 1
     if ($cs.Index -lt 0) { $cs.Index = $cs.Matches.Count - 1 }
 }
-
 $cs = & $mod { $script:CompletionState }
-Assert-Equal 0 $cs.Index "After cycling backward, index is 0 again"
-
-# Simulate wrap-around (Ctrl+P from index 0)
-& $mod {
-    $cs = $script:CompletionState
-    $cs.Index -= 1
-    if ($cs.Index -lt 0) { $cs.Index = $cs.Matches.Count - 1 }
-}
-
-$cs = & $mod { $script:CompletionState }
-Assert-Equal 2 $cs.Index "After wrap-around backward, index is 2 (last)"
-Assert-Equal 'deployment-alpha' $cs.Matches[$cs.Index] "Wrapped to deployment-alpha"
+Assert-Equal 3 $cs.Index "Ctrl+P from index 0 wraps to last (original prefix)"
+Assert-Equal 'deploy' $cs.Matches[$cs.Index] "Wrapped to original prefix"
 
 Write-Host "`n--- Buffer Scraper + Out-Default Token Capture ---" -ForegroundColor Yellow
 
