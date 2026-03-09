@@ -395,6 +395,21 @@ function script:Invoke-TokenCompletion {
 }
 
 function script:Install-KeyHandlers {
+    # Cache PSReadLine internal ForceRender via reflection (once) so completions
+    # render reliably after vi-mode edits without redrawing the prompt.
+    $psrlType = [Microsoft.PowerShell.PSConsoleReadLine]
+    $singletonField = $psrlType.GetField('_singleton', [System.Reflection.BindingFlags]'Static,NonPublic')
+    $renderMethod = $null
+    if ($singletonField) {
+        $inst = $singletonField.GetValue($null)
+        if ($inst) {
+            $renderMethod = $inst.GetType().GetMethod('ForceRender', [System.Reflection.BindingFlags]'Instance,NonPublic')
+        }
+    }
+    $global:__sbpForceRender = if ($renderMethod -and $singletonField) {
+        @{ Field = $singletonField; Method = $renderMethod }
+    } else { $null }
+
     # Key handlers call into the module for state management, then apply
     # the buffer edit directly so PSReadLine renders it in the right context.
     Set-PSReadLineKeyHandler -Key Ctrl+n -BriefDescription 'ScrollbackCompleteNext' `
@@ -404,7 +419,10 @@ function script:Install-KeyHandlers {
             if ($r) {
                 [Microsoft.PowerShell.PSConsoleReadLine]::Replace($r.Start, $r.Length, $r.Text)
                 [Microsoft.PowerShell.PSConsoleReadLine]::SetCursorPosition($r.Start + $r.Text.Length)
-                [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
+                if ($global:__sbpForceRender) {
+                    $inst = $global:__sbpForceRender.Field.GetValue($null)
+                    $global:__sbpForceRender.Method.Invoke($inst, @())
+                }
             } else {
                 [Microsoft.PowerShell.PSConsoleReadLine]::Ding()
             }
@@ -417,7 +435,10 @@ function script:Install-KeyHandlers {
             if ($r) {
                 [Microsoft.PowerShell.PSConsoleReadLine]::Replace($r.Start, $r.Length, $r.Text)
                 [Microsoft.PowerShell.PSConsoleReadLine]::SetCursorPosition($r.Start + $r.Text.Length)
-                [Microsoft.PowerShell.PSConsoleReadLine]::InvokePrompt()
+                if ($global:__sbpForceRender) {
+                    $inst = $global:__sbpForceRender.Field.GetValue($null)
+                    $global:__sbpForceRender.Method.Invoke($inst, @())
+                }
             } else {
                 [Microsoft.PowerShell.PSConsoleReadLine]::Ding()
             }
@@ -427,6 +448,7 @@ function script:Install-KeyHandlers {
 function script:Uninstall-KeyHandlers {
     Remove-PSReadLineKeyHandler -Key Ctrl+n -ErrorAction SilentlyContinue
     Remove-PSReadLineKeyHandler -Key Ctrl+p -ErrorAction SilentlyContinue
+    Remove-Variable -Name __sbpForceRender -Scope Global -ErrorAction SilentlyContinue
 }
 
 #endregion
