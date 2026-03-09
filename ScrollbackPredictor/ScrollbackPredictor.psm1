@@ -382,7 +382,7 @@ function script:Invoke-TokenCompletion {
         if ($cs.Index -lt 0) { $cs.Index = $cs.Matches.Count - 1 }
     }
 
-    # Replace the word in the buffer
+    # Replace the word in the buffer and move cursor to end of replacement
     $match = $cs.Matches[$cs.Index]
     $replLen = $cs.ReplacementEnd - $cs.ReplacementStart
     [Microsoft.PowerShell.PSConsoleReadLine]::Replace(
@@ -391,6 +391,7 @@ function script:Invoke-TokenCompletion {
         $match
     )
     $cs.ReplacementEnd = $cs.ReplacementStart + $match.Length
+    [Microsoft.PowerShell.PSConsoleReadLine]::SetCursorPosition($cs.ReplacementEnd)
 
     # Deactivate when we cycle back to the original prefix
     if ($cs.Index -eq $cs.Matches.Count - 1) {
