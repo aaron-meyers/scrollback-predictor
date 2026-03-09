@@ -356,14 +356,12 @@ function script:Invoke-TokenCompletion {
         $prefix = $line.Substring($wordStart, $cursor - $wordStart)
 
         if ([string]::IsNullOrEmpty($prefix)) {
-            [Microsoft.PowerShell.PSConsoleReadLine]::Ding()
-            return
+            return $null
         }
 
         $matches = Find-TokenMatches $prefix
         if ($matches.Count -eq 0) {
-            [Microsoft.PowerShell.PSConsoleReadLine]::Ding()
-            return
+            return $null
         }
 
         # Append the original prefix so cycling wraps back to it (vim behavior)
@@ -382,34 +380,45 @@ function script:Invoke-TokenCompletion {
         if ($cs.Index -lt 0) { $cs.Index = $cs.Matches.Count - 1 }
     }
 
-    # Replace the word in the buffer and move cursor to end of replacement
     $match = $cs.Matches[$cs.Index]
+    $replStart = $cs.ReplacementStart
     $replLen = $cs.ReplacementEnd - $cs.ReplacementStart
-    [Microsoft.PowerShell.PSConsoleReadLine]::Replace(
-        $cs.ReplacementStart,
-        $replLen,
-        $match
-    )
     $cs.ReplacementEnd = $cs.ReplacementStart + $match.Length
-    [Microsoft.PowerShell.PSConsoleReadLine]::SetCursorPosition($cs.ReplacementEnd)
 
     # Deactivate when we cycle back to the original prefix
     if ($cs.Index -eq $cs.Matches.Count - 1) {
         $cs.Active = $false
     }
+
+    # Return replacement info for the key handler to apply
+    return @{ Start = $replStart; Length = $replLen; Text = $match }
 }
 
 function script:Install-KeyHandlers {
+    # Key handlers call into the module for state management, then apply
+    # the buffer edit directly so PSReadLine renders it in the right context.
     Set-PSReadLineKeyHandler -Key Ctrl+n -BriefDescription 'ScrollbackCompleteNext' `
         -LongDescription 'Complete token from scrollback history (next match)' `
         -ScriptBlock {
-            & (Get-Module ScrollbackPredictor) { Invoke-TokenCompletion -Direction 1 }
+            $r = & (Get-Module ScrollbackPredictor) { Invoke-TokenCompletion -Direction 1 }
+            if ($r) {
+                [Microsoft.PowerShell.PSConsoleReadLine]::Replace($r.Start, $r.Length, $r.Text)
+                [Microsoft.PowerShell.PSConsoleReadLine]::SetCursorPosition($r.Start + $r.Text.Length)
+            } else {
+                [Microsoft.PowerShell.PSConsoleReadLine]::Ding()
+            }
         }
 
     Set-PSReadLineKeyHandler -Key Ctrl+p -BriefDescription 'ScrollbackCompletePrev' `
         -LongDescription 'Complete token from scrollback history (previous match)' `
         -ScriptBlock {
-            & (Get-Module ScrollbackPredictor) { Invoke-TokenCompletion -Direction (-1) }
+            $r = & (Get-Module ScrollbackPredictor) { Invoke-TokenCompletion -Direction (-1) }
+            if ($r) {
+                [Microsoft.PowerShell.PSConsoleReadLine]::Replace($r.Start, $r.Length, $r.Text)
+                [Microsoft.PowerShell.PSConsoleReadLine]::SetCursorPosition($r.Start + $r.Text.Length)
+            } else {
+                [Microsoft.PowerShell.PSConsoleReadLine]::Ding()
+            }
         }
 }
 
