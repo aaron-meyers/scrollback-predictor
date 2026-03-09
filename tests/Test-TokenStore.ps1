@@ -70,6 +70,20 @@ Assert-True ($count -ge 3) "Basic extraction: got $count tokens (expected >= 3)"
 $count = Get-ScrollbackTokenCount
 Assert-Equal 2 $count "Short token filter: only 'cd' and 'efg' should pass (min length 2)"
 
+# Test trailing period is stripped
+& $mod {
+    $script:TokenMap.Clear()
+    $script:TokenCounter = 0
+    Extract-TokensFromText "6501ms. done. hello.world running"
+}
+$tokens = Get-ScrollbackToken -Count 100
+$tokenNames = @($tokens) | ForEach-Object { if ($_ -is [string]) { $_ } else { $_.Token } }
+Assert-True ($tokenNames -contains '6501ms') "Trailing period stripped: '6501ms' present"
+Assert-True ($tokenNames -notcontains '6501ms.') "Trailing period stripped: '6501ms.' absent"
+Assert-True ($tokenNames -contains 'done') "Trailing period stripped: 'done' present"
+Assert-True ($tokenNames -notcontains 'done.') "Trailing period stripped: 'done.' absent"
+Assert-True ($tokenNames -contains 'hello.world') "Internal period preserved: 'hello.world' present"
+
 # Test path decomposition
 & $mod {
     $script:TokenMap.Clear()

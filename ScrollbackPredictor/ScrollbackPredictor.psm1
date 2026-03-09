@@ -71,7 +71,7 @@ function script:Extract-TokensFromText([string]$Text) {
         if (-not $raw) { continue }
 
         # Strip leading/trailing punctuation but keep internal special chars (paths, URLs)
-        $cleaned = $raw -replace '^[^\w/\\~\.]+' -replace '[^\w/\\~\.]+$'
+        $cleaned = $raw -replace '^[^\w/\\~\.]+' -replace '[^\w/\\~\.]+$' -replace '\.$'
         if ($cleaned) {
             Add-Token $cleaned
         }
