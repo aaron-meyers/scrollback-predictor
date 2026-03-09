@@ -175,8 +175,9 @@ function script:Read-ConsoleBuffer {
         $script:LastCursorY = $currentY
     }
     catch {
-        # Buffer scraping not supported in this host; disable silently
-        $script:Config.EnableBufferScrape = $false
+        # Don't disable permanently — just skip this read and update cursor
+        # so we don't re-read the same region next time
+        try { $script:LastCursorY = $Host.UI.RawUI.CursorPosition.Y } catch {}
     }
 }
 
@@ -184,14 +185,24 @@ function script:Read-ConsoleBuffer {
 
 #region ---- Out-Default Proxy ----
 
+# Shared .NET list accessible from global scope without module invocation.
+# The proxy writes text here; the prompt hook drains it into the token store.
+$script:PendingOutputText = [System.Collections.Generic.List[string]]::new()
+
+function script:Drain-PendingOutput {
+    if ($script:PendingOutputText.Count -gt 0) {
+        foreach ($text in $script:PendingOutputText) {
+            Extract-TokensFromText $text
+        }
+        $script:PendingOutputText.Clear()
+    }
+}
+
 function script:Install-OutDefaultProxy {
-    # Store pending objects in a module-scoped variable so the global function can access it
-    $script:OutDefaultPendingObjects = $null
+    # Store the shared list in a global variable so the proxy function can access it
+    # without needing to call back into the module scope
+    $global:__sbpPendingText = $script:PendingOutputText
 
-    $modulePath = $MyInvocation.ScriptName
-    $moduleScope = $script:MyInvocation.MyCommand.ScriptBlock.Module
-
-    # Create the proxy function in global scope
     $proxyFunc = {
         [CmdletBinding()]
         param(
@@ -210,27 +221,29 @@ function script:Install-OutDefaultProxy {
             $steppablePipeline.Begin($PSCmdlet)
 
             $pending = [System.Collections.Generic.List[object]]::new()
-            $ExecutionContext.SessionState.PSVariable.Set('__sbpPending', $pending)
+            Set-Variable -Name __sbpLocalPending -Value $pending -Scope 0
         }
 
         process {
             if ($null -ne $InputObject) {
-                $p = $ExecutionContext.SessionState.PSVariable.GetValue('__sbpPending')
-                if ($null -ne $p -and $p.Count -lt 5000) {
-                    $p.Add($InputObject)
+                $lp = $__sbpLocalPending
+                if ($null -ne $lp -and $lp.Count -lt 5000) {
+                    $lp.Add($InputObject)
                 }
             }
             $steppablePipeline.Process($InputObject)
         }
 
         end {
-            $p = $ExecutionContext.SessionState.PSVariable.GetValue('__sbpPending')
-            if ($null -ne $p -and $p.Count -gt 0) {
-                try {
-                    $text = ($p | Out-String -Width 500).Trim()
-                    & (Get-Module ScrollbackPredictor) { param($t) Extract-TokensFromText $t } $text
-                } catch {}
-            }
+            try {
+                $lp = $__sbpLocalPending
+                if ($null -ne $lp -and $lp.Count -gt 0) {
+                    $text = ($lp | Out-String -Width 500).Trim()
+                    if ($text -and $global:__sbpPendingText) {
+                        $global:__sbpPendingText.Add($text)
+                    }
+                }
+            } catch {}
             $steppablePipeline.End()
         }
     }
@@ -240,6 +253,7 @@ function script:Install-OutDefaultProxy {
 
 function script:Uninstall-OutDefaultProxy {
     Remove-Item Function:\global:Out-Default -ErrorAction SilentlyContinue
+    Remove-Variable -Name __sbpPendingText -Scope Global -ErrorAction SilentlyContinue
 }
 
 #endregion
@@ -260,6 +274,9 @@ function script:Install-PromptHook {
         $mod = Get-Module ScrollbackPredictor
         if ($mod) {
             & $mod {
+                # Drain any output captured by Out-Default proxy
+                Drain-PendingOutput
+                # Scrape console buffer for anything the proxy missed
                 if ($script:Config.EnableBufferScrape) {
                     Read-ConsoleBuffer
                 }
